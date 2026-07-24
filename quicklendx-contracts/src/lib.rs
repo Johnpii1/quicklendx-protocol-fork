@@ -169,6 +169,8 @@ mod test_dispute_timeline_props;
 // mod test_dispute_event_invariant;
 #[cfg(test)]
 mod test_dust_transfer;
+#[cfg(test)]
+mod test_escrow_early_release;
 #[cfg(all(test, feature = "legacy-tests"))]
 mod test_escrow_event_completeness;
 #[cfg(all(test, feature = "legacy-tests"))]
@@ -465,6 +467,20 @@ fn u64_to_ascii_20(mut value: u64, buf: &mut [u8; 20]) -> usize {
         buf[i] = tmp[len - 1 - i];
     }
     len
+}
+
+fn early_release_approval_key(
+    invoice_id: &BytesN<32>,
+    approver: &Address,
+) -> (soroban_sdk::Symbol, BytesN<32>, Address) {
+    (symbol_short!("er_appr"), invoice_id.clone(), approver.clone())
+}
+
+fn has_early_release_approval(env: &Env, invoice_id: &BytesN<32>, approver: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&early_release_approval_key(invoice_id, approver))
+        .unwrap_or(false)
 }
 
 #[contractimpl]
@@ -2500,6 +2516,106 @@ impl QuickLendXContract {
     ) -> Result<payments::Escrow, QuickLendXError> {
         AdminStorage::require_admin_auth(&env, &admin)?;
         EscrowStorage::get_escrow(&env, &escrow_id).ok_or(QuickLendXError::StorageKeyNotFound)
+    }
+
+    /// Approve an early escrow release before normal settlement finalization.
+    ///
+    /// The invoice business and accepted investor must both approve before
+    /// `execute_early_escrow_release` can release held escrow funds.
+    pub fn approve_early_escrow_release(
+        env: Env,
+        invoice_id: BytesN<32>,
+        approver: Address,
+    ) -> Result<(), QuickLendXError> {
+        pause::PauseControl::require_not_paused(&env)?;
+        approver.require_auth();
+
+        let invoice = InvoiceStorage::get_invoice(&env, &invoice_id)
+            .ok_or(QuickLendXError::InvoiceNotFound)?;
+        if invoice.status != InvoiceStatus::Funded {
+            return Err(QuickLendXError::InvalidStatus);
+        }
+
+        let investor = invoice.investor.clone().ok_or(QuickLendXError::InvoiceNotFunded)?;
+        if approver != invoice.business && approver != investor {
+            return Err(QuickLendXError::Unauthorized);
+        }
+
+        let escrow = EscrowStorage::get_escrow_by_invoice(&env, &invoice_id)
+            .ok_or(QuickLendXError::StorageKeyNotFound)?;
+        if escrow.status != payments::EscrowStatus::Held {
+            return Err(QuickLendXError::InvalidStatus);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&early_release_approval_key(&invoice_id, &approver), &true);
+        Ok(())
+    }
+
+    /// Revoke the caller's early escrow release approval while escrow is still held.
+    pub fn revoke_early_escrow_release(
+        env: Env,
+        invoice_id: BytesN<32>,
+        approver: Address,
+    ) -> Result<(), QuickLendXError> {
+        pause::PauseControl::require_not_paused(&env)?;
+        approver.require_auth();
+
+        let invoice = InvoiceStorage::get_invoice(&env, &invoice_id)
+            .ok_or(QuickLendXError::InvoiceNotFound)?;
+        if invoice.status != InvoiceStatus::Funded {
+            return Err(QuickLendXError::InvalidStatus);
+        }
+
+        let investor = invoice.investor.clone().ok_or(QuickLendXError::InvoiceNotFunded)?;
+        if approver != invoice.business && approver != investor {
+            return Err(QuickLendXError::Unauthorized);
+        }
+
+        let escrow = EscrowStorage::get_escrow_by_invoice(&env, &invoice_id)
+            .ok_or(QuickLendXError::StorageKeyNotFound)?;
+        if escrow.status != payments::EscrowStatus::Held {
+            return Err(QuickLendXError::InvalidStatus);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&early_release_approval_key(&invoice_id, &approver), &false);
+        Ok(())
+    }
+
+    /// Execute early escrow release after both the business and investor approve.
+    pub fn execute_early_escrow_release(
+        env: Env,
+        invoice_id: BytesN<32>,
+    ) -> Result<(), QuickLendXError> {
+        pause::PauseControl::require_not_paused(&env)?;
+        reentrancy::with_payment_guard(&env, || {
+            let invoice = InvoiceStorage::get_invoice(&env, &invoice_id)
+                .ok_or(QuickLendXError::InvoiceNotFound)?;
+            if invoice.status != InvoiceStatus::Funded {
+                return Err(QuickLendXError::InvalidStatus);
+            }
+            let investor = invoice.investor.clone().ok_or(QuickLendXError::InvoiceNotFunded)?;
+            if !has_early_release_approval(&env, &invoice_id, &invoice.business)
+                || !has_early_release_approval(&env, &invoice_id, &investor)
+            {
+                return Err(QuickLendXError::OperationNotAllowed);
+            }
+
+            let escrow = EscrowStorage::get_escrow_by_invoice(&env, &invoice_id)
+                .ok_or(QuickLendXError::StorageKeyNotFound)?;
+            release_escrow(&env, &invoice_id)?;
+            emit_escrow_released(
+                &env,
+                &escrow.escrow_id,
+                &invoice_id,
+                &escrow.business,
+                escrow.amount,
+            );
+            Ok(())
+        })
     }
 
     /// Release escrow funds to business upon invoice verification
