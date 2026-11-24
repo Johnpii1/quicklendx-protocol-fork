@@ -123,3 +123,70 @@ fn test_available_invoices_cursored_pagination() {
     );
     assert_eq!(page2.generation, gen);
 }
+
+
+#[test]
+fn test_kyc_business_pages_of_one_traverse_without_gaps_or_duplicates() {
+    let (env, client) = setup();
+    let business_a = Address::generate(&env);
+    let business_b = Address::generate(&env);
+    let kyc_a = String::from_str(&env, "business-a-kyc");
+    let kyc_b = String::from_str(&env, "business-b-kyc");
+
+    client.submit_kyc_application(&business_a, &kyc_a);
+    client.submit_kyc_application(&business_b, &kyc_b);
+
+    let first = client.get_businesses_paged(
+        &crate::verification::BusinessVerificationStatus::Pending,
+        &None,
+        &1,
+    );
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(first.total_count, 2);
+    let cursor = first.next_cursor.expect("first page should have a next cursor");
+
+    let second = client.get_businesses_paged(
+        &crate::verification::BusinessVerificationStatus::Pending,
+        &Some(cursor),
+        &1,
+    );
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.total_count, 2);
+    assert!(second.next_cursor.is_none());
+    assert_ne!(first.items.get(0), second.items.get(0));
+
+    let visited = [first.items.get(0).unwrap(), second.items.get(0).unwrap()];
+    assert!(visited.contains(&business_a));
+    assert!(visited.contains(&business_b));
+}
+
+#[test]
+fn test_kyc_investor_pages_of_one_traverse_without_gaps_or_duplicates() {
+    let (env, client) = setup();
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+
+    client.submit_investor_kyc(&investor_a, &String::from_str(&env, "investor-a-kyc"));
+    client.submit_investor_kyc(&investor_b, &String::from_str(&env, "investor-b-kyc"));
+
+    let first = client.get_investors_paged(
+        &crate::verification::BusinessVerificationStatus::Pending,
+        &None,
+        &1,
+    );
+    assert_eq!(first.items.len(), 1);
+    let cursor = first.next_cursor.expect("first page should have a next cursor");
+
+    let second = client.get_investors_paged(
+        &crate::verification::BusinessVerificationStatus::Pending,
+        &Some(cursor),
+        &1,
+    );
+    assert_eq!(second.items.len(), 1);
+    assert!(second.next_cursor.is_none());
+    assert_ne!(first.items.get(0), second.items.get(0));
+
+    let visited = [first.items.get(0).unwrap(), second.items.get(0).unwrap()];
+    assert!(visited.contains(&investor_a));
+    assert!(visited.contains(&investor_b));
+}
