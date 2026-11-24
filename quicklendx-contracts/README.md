@@ -1396,3 +1396,14 @@ Due to mingw linker limitations on Windows, you may encounter "export ordinal to
 - Uses `stable` Rust toolchain 
 - Local Windows development uses GNU toolchain (`stable-x86_64-pc-windows-gnu`)
 - Set with: `rustup override set stable-x86_64-pc-windows-gnu` in the contracts directory
+
+## Business and investor registry API
+
+The contract exposes the KYC registry operations directly through the `QuickLendXContract` interface:
+
+- `reject_business(admin, business, reason)` and `reject_investor(admin, investor, reason)` reject pending KYC applications and write the corresponding KYC rejection event and audit record.
+- `delete_business(business)` removes a business from its KYC status indexes and marks its registry record deleted, subject to the governance-proposal guard.
+- `get_businesses_paged(status, cursor, limit)` and `get_investors_paged(status, cursor, limit)` return deterministic pages with an optional `next_cursor`. Pass the returned cursor to the next request and stop when it is `None`.
+- `get_corridors()`, `get_grace_period_seconds()`, `get_min_invoice_amount()`, and `get_max_due_date_days()` expose the current protocol configuration. These read-only getters remain available while the contract is paused.
+
+Page limits are bounded by the KYC pagination policy. A `None` cursor requests the first page; a `None` `next_cursor` indicates the end of the result set.

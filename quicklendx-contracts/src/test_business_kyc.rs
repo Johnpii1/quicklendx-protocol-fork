@@ -1158,3 +1158,43 @@ fn test_no_duplicate_entries_in_index_lists() {
     let total_count = verified.len() + pending.len() + rejected.len();
     assert_eq!(total_count, 1);
 }
+
+
+#[test]
+fn test_rejection_entrypoint_writes_audit_record() {
+    let (env, client, admin) = setup();
+    let business = Address::generate(&env);
+    let kyc_data = create_test_kyc_data(&env, "AuditedRejection");
+    let reason = String::from_str(&env, "Missing compliance evidence");
+
+    client.submit_kyc_application(&business, &kyc_data);
+    let before = crate::audit::AuditStorage::get_audit_entries_by_operation(
+        &env,
+        &crate::audit::AuditOperation::KycRejected,
+    )
+    .len();
+
+    client.reject_business(&admin, &business, &reason);
+
+    let rejected = crate::audit::AuditStorage::get_audit_entries_by_operation(
+        &env,
+        &crate::audit::AuditOperation::KycRejected,
+    );
+    assert_eq!(rejected.len(), before + 1);
+    let verification = client.get_business_verification_status(&business).unwrap();
+    assert!(matches!(verification.status, BusinessVerificationStatus::Rejected));
+    assert_eq!(verification.rejection_reason, Some(reason));
+}
+
+
+#[test]
+fn test_protocol_configuration_getters_remain_available_while_paused() {
+    let (_env, client, admin) = setup();
+    client.pause(&admin);
+
+    let _corridors = client.get_corridors();
+    let _grace_period = client.get_grace_period_seconds();
+    let _minimum_invoice_amount = client.get_min_invoice_amount();
+    let _maximum_due_date_days = client.get_max_due_date_days();
+    assert!(client.is_paused());
+}

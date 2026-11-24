@@ -760,6 +760,72 @@ impl QuickLendXContract {
         crate::verification::verify_business(&env, &admin, &business)
     }
 
+    /// Reject a pending business KYC application with an auditable reason.
+    pub fn reject_business(
+        env: Env,
+        admin: Address,
+        business: Address,
+        reason: String,
+    ) -> Result<(), QuickLendXError> {
+        crate::verification::reject_business(&env, &admin, &business, reason)
+    }
+
+    /// Reject a pending investor KYC application with an auditable reason.
+    pub fn reject_investor(
+        env: Env,
+        admin: Address,
+        investor: Address,
+        reason: String,
+    ) -> Result<(), QuickLendXError> {
+        crate::verification::reject_investor(&env, &admin, &investor, reason)
+    }
+
+    /// Delete a business registry entry after checking governance constraints.
+    pub fn delete_business(env: Env, business: Address) -> Result<(), QuickLendXError> {
+        crate::governance::require_no_open_governance_proposal(&env)?;
+        crate::verification::BusinessVerificationStorage::delete_business(&env, &business)
+    }
+
+    /// Return a cursor-paginated page of businesses in the requested KYC state.
+    pub fn get_businesses_paged(
+        env: Env,
+        status: crate::verification::BusinessVerificationStatus,
+        cursor: Option<String>,
+        limit: u32,
+    ) -> Result<crate::kyc_policy::KycPageResult, QuickLendXError> {
+        crate::kyc_policy::get_businesses_paged(&env, status, cursor, limit)
+    }
+
+    /// Return a cursor-paginated page of investors in the requested KYC state.
+    pub fn get_investors_paged(
+        env: Env,
+        status: crate::verification::BusinessVerificationStatus,
+        cursor: Option<String>,
+        limit: u32,
+    ) -> Result<crate::kyc_policy::KycPageResult, QuickLendXError> {
+        crate::kyc_policy::get_investors_paged(&env, status, cursor, limit)
+    }
+
+    /// Read the configured list of supported corridors.
+    pub fn get_corridors(env: Env) -> Vec<Address> {
+        crate::init::ProtocolInitializer::get_corridors(&env)
+    }
+
+    /// Read the configured protocol grace period in seconds.
+    pub fn get_grace_period_seconds(env: Env) -> u64 {
+        crate::init::ProtocolInitializer::get_grace_period_seconds(&env)
+    }
+
+    /// Read the minimum permitted invoice amount.
+    pub fn get_min_invoice_amount(env: Env) -> i128 {
+        crate::init::ProtocolInitializer::get_min_invoice_amount(&env)
+    }
+
+    /// Read the maximum permitted invoice due-date horizon in days.
+    pub fn get_max_due_date_days(env: Env) -> u64 {
+        crate::init::ProtocolInitializer::get_max_due_date_days(&env)
+    }
+
     pub fn submit_investor_kyc(
         env: Env,
         investor: Address,
