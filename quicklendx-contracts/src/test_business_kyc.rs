@@ -1185,3 +1185,16 @@ fn test_rejection_entrypoint_writes_audit_record() {
     assert!(matches!(verification.status, BusinessVerificationStatus::Rejected));
     assert_eq!(verification.rejection_reason, Some(reason));
 }
+
+
+#[test]
+fn test_protocol_configuration_getters_remain_available_while_paused() {
+    let (_env, client, admin) = setup();
+    client.pause(&admin);
+
+    let _corridors = client.get_corridors();
+    let _grace_period = client.get_grace_period_seconds();
+    let _minimum_invoice_amount = client.get_min_invoice_amount();
+    let _maximum_due_date_days = client.get_max_due_date_days();
+    assert!(client.is_paused());
+}
