@@ -1158,3 +1158,30 @@ fn test_no_duplicate_entries_in_index_lists() {
     let total_count = verified.len() + pending.len() + rejected.len();
     assert_eq!(total_count, 1);
 }
+
+
+#[test]
+fn test_rejection_entrypoint_writes_audit_record() {
+    let (env, client, admin) = setup();
+    let business = Address::generate(&env);
+    let kyc_data = create_test_kyc_data(&env, "AuditedRejection");
+    let reason = String::from_str(&env, "Missing compliance evidence");
+
+    client.submit_kyc_application(&business, &kyc_data);
+    let before = crate::audit::AuditStorage::get_audit_entries_by_operation(
+        &env,
+        &crate::audit::AuditOperation::KycRejected,
+    )
+    .len();
+
+    client.reject_business(&admin, &business, &reason);
+
+    let rejected = crate::audit::AuditStorage::get_audit_entries_by_operation(
+        &env,
+        &crate::audit::AuditOperation::KycRejected,
+    );
+    assert_eq!(rejected.len(), before + 1);
+    let verification = client.get_business_verification_status(&business).unwrap();
+    assert!(matches!(verification.status, BusinessVerificationStatus::Rejected));
+    assert_eq!(verification.rejection_reason, Some(reason));
+}
